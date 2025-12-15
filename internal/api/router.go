@@ -32,6 +32,7 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, cfg *config.Config) http.Handler 
 	authHandler := handlers.NewAuthHandler(db, rdb, cfg)
 	driverHandler := handlers.NewDriverHandler(db, rdb, cfg)
 	rideHandler := handlers.NewRideHandler(db, rdb, cfg)
+	adminHandler := handlers.NewAdminHandler(db)
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -66,6 +67,11 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, cfg *config.Config) http.Handler 
 
 			r.Get("/drivers/nearby", driverHandler.GetNearbyDrivers)
 		})
+	})
+
+	// Minimal admin panel (basic auth: admin/admin)
+	r.Route("/admin", func(ar chi.Router) {
+		handlers.RegisterAdminRoutes(ar, adminHandler)
 	})
 
 	return r

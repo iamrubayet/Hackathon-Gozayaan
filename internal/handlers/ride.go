@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"time"
@@ -85,6 +86,8 @@ func (h *RideHandler) CreateRide(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create ride"})
 		return
 	}
+
+	h.logHistory(ride.ID, "requested", fmt.Sprintf("created by rider %s", userID))
 
 	respondJSON(w, http.StatusCreated, ride)
 }
@@ -188,6 +191,8 @@ func (h *RideHandler) AcceptRide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.logHistory(ride.ID, "accepted", fmt.Sprintf("accepted by driver %s", driver.ID))
+
 	driver.IsAvailable = false
 	h.db.Save(&driver)
 
@@ -227,6 +232,8 @@ func (h *RideHandler) StartRide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.logHistory(ride.ID, "started", fmt.Sprintf("started by driver %s", driver.ID))
+
 	respondJSON(w, http.StatusOK, ride)
 }
 
@@ -264,6 +271,8 @@ func (h *RideHandler) CompleteRide(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to complete ride"})
 		return
 	}
+
+	h.logHistory(ride.ID, "completed", fmt.Sprintf("completed by driver %s", driver.ID))
 
 	driver.IsAvailable = true
 	driver.TotalRides += 1
@@ -306,6 +315,12 @@ func (h *RideHandler) CancelRide(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to cancel ride"})
 		return
 	}
+
+	note := fmt.Sprintf("cancelled by user %s", userID)
+	if ride.DriverID != nil {
+		note = fmt.Sprintf("cancelled; driver %s released", *ride.DriverID)
+	}
+	h.logHistory(ride.ID, "cancelled", note)
 
 	if ride.DriverID != nil {
 		var driver models.Driver
@@ -382,6 +397,11 @@ func (h *RideHandler) RateRide(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusCreated, rating)
+}
+
+// logHistory records ride state transitions for admin visibility; best-effort (errors ignored).
+func (h *RideHandler) logHistory(rideID, status, note string) {
+	_ = h.db.Create(&models.RideHistory{RideID: rideID, Status: status, Note: note}).Error
 }
 
 func calculateFare(distance float64) float64 {

@@ -57,3 +57,11 @@ type Rating struct {
 	Comment   string    `json:"comment"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+type RideHistory struct {
+	ID        string    `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+	RideID    string    `gorm:"not null;index" json:"ride_id"`
+	Status    string    `gorm:"not null" json:"status"`
+	Note      string    `json:"note"`
+	CreatedAt time.Time `json:"created_at"`
+}
