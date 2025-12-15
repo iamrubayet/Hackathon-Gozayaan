@@ -34,6 +34,15 @@ type CreateRideRequest struct {
 	DropoffAddress string  `json:"dropoff_address"`
 }
 
+type CreateFareRequest struct {
+	PickupLat      float64 `json:"pickup_lat"`
+	PickupLng      float64 `json:"pickup_lng"`
+	PickupAddress  string  `json:"pickup_address"`
+	DropoffLat     float64 `json:"dropoff_lat"`
+	DropoffLng     float64 `json:"dropoff_lng"`
+	DropoffAddress string  `json:"dropoff_address"`
+}
+
 type RateRideRequest struct {
 	Rating  int    `json:"rating"`
 	Comment string `json:"comment"`
@@ -95,21 +104,24 @@ func (h *RideHandler) GetRides(w http.ResponseWriter, r *http.Request) {
 			respondJSON(w, http.StatusNotFound, map[string]string{"error": "driver profile not found"})
 			return
 		}
-		query = query.Where("driver_id = ? OR (status = 'requested' AND driver_id IS NULL)", driver.ID)
 
-		if err := query.Find(&rides).Error; err != nil {
+		// Get rides assigned to this driver OR available requested rides
+		var assignedRides []models.Ride
+		if err := h.db.Order("created_at DESC").Where("driver_id = ?", driver.ID).Find(&assignedRides).Error; err != nil {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to fetch rides"})
 			return
 		}
 
-		// Filter rides based on distance from driver's current location
-		filteredRides := []models.Ride{}
-		for _, ride := range rides {
-			// Include rides already assigned to this driver regardless of distance
-			if ride.DriverID == driver.ID {
-				filteredRides = append(filteredRides, ride)
-			} else if ride.Status == "requested" && driver.CurrentLat != 0 && driver.CurrentLng != 0 {
-				// For available rides, check if within 10km
+		var availableRides []models.Ride
+		if err := h.db.Order("created_at DESC").Where("status = ? AND driver_id IS NULL", "requested").Find(&availableRides).Error; err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to fetch rides"})
+			return
+		}
+
+		// Filter available rides based on distance from driver's current location
+		filteredRides := assignedRides // Always include assigned rides
+		if driver.CurrentLat != 0 && driver.CurrentLng != 0 {
+			for _, ride := range availableRides {
 				distance := haversine(driver.CurrentLat, driver.CurrentLng, ride.PickupLat, ride.PickupLng)
 				if distance <= 10 {
 					filteredRides = append(filteredRides, ride)
@@ -168,7 +180,7 @@ func (h *RideHandler) AcceptRide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ride.DriverID = driver.ID
+	ride.DriverID = &driver.ID
 	ride.Status = "accepted"
 
 	if err := h.db.Save(&ride).Error; err != nil {
@@ -198,7 +210,7 @@ func (h *RideHandler) StartRide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if ride.DriverID != driver.ID {
+	if ride.DriverID == nil || *ride.DriverID != driver.ID {
 		respondJSON(w, http.StatusForbidden, map[string]string{"error": "not authorized"})
 		return
 	}
@@ -234,7 +246,7 @@ func (h *RideHandler) CompleteRide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if ride.DriverID != driver.ID {
+	if ride.DriverID == nil || *ride.DriverID != driver.ID {
 		respondJSON(w, http.StatusForbidden, map[string]string{"error": "not authorized"})
 		return
 	}
@@ -273,7 +285,7 @@ func (h *RideHandler) CancelRide(w http.ResponseWriter, r *http.Request) {
 	if ride.RiderID != userID {
 		var driver models.Driver
 		if err := h.db.Where("user_id = ?", userID).First(&driver).Error; err == nil {
-			if ride.DriverID != driver.ID {
+			if ride.DriverID == nil || *ride.DriverID != driver.ID {
 				respondJSON(w, http.StatusForbidden, map[string]string{"error": "not authorized"})
 				return
 			}
@@ -295,9 +307,9 @@ func (h *RideHandler) CancelRide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if ride.DriverID != "" {
+	if ride.DriverID != nil {
 		var driver models.Driver
-		if err := h.db.First(&driver, "id = ?", ride.DriverID).Error; err == nil {
+		if err := h.db.First(&driver, "id = ?", *ride.DriverID).Error; err == nil {
 			driver.IsAvailable = true
 			h.db.Save(&driver)
 		}
@@ -343,10 +355,15 @@ func (h *RideHandler) RateRide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if ride.DriverID == nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "ride not assigned to a driver"})
+		return
+	}
+
 	rating := &models.Rating{
 		RideID:   ride.ID,
 		RiderID:  ride.RiderID,
-		DriverID: ride.DriverID,
+		DriverID: *ride.DriverID,
 		Rating:   req.Rating,
 		Comment:  req.Comment,
 	}
@@ -357,7 +374,7 @@ func (h *RideHandler) RateRide(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var driver models.Driver
-	if err := h.db.First(&driver, "id = ?", ride.DriverID).Error; err == nil {
+	if err := h.db.First(&driver, "id = ?", *ride.DriverID).Error; err == nil {
 		var avgRating float64
 		h.db.Model(&models.Rating{}).Where("driver_id = ?", driver.ID).Select("AVG(rating)").Scan(&avgRating)
 		driver.Rating = math.Round(avgRating*100) / 100
@@ -371,4 +388,40 @@ func calculateFare(distance float64) float64 {
 	baseFare := 30.0
 	perKmRate := 15.0
 	return math.Round((baseFare+distance*perKmRate)*100) / 100
+}
+
+func (h *RideHandler) CreateFare(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	userType := middleware.GetUserType(r.Context())
+
+	if userType != "rider" {
+		respondJSON(w, http.StatusForbidden, map[string]string{"error": "only riders can create rides"})
+		return
+	}
+
+	var req CreateFareRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+
+	distance := haversine(req.PickupLat, req.PickupLng, req.DropoffLat, req.DropoffLng)
+	duration := int(distance / 0.5)
+	fare := calculateFare(distance)
+
+	ride := &models.Ride{
+		RiderID:        userID,
+		PickupLat:      req.PickupLat,
+		PickupLng:      req.PickupLng,
+		PickupAddress:  req.PickupAddress,
+		DropoffLat:     req.DropoffLat,
+		DropoffLng:     req.DropoffLng,
+		DropoffAddress: req.DropoffAddress,
+		Status:         "FARE_ESTIMATED",
+		Fare:           fare,
+		Distance:       distance,
+		Duration:       duration,
+	}
+
+	respondJSON(w, http.StatusCreated, ride)
 }

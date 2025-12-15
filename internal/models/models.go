@@ -32,7 +32,7 @@ type Driver struct {
 type Ride struct {
 	ID             string     `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
 	RiderID        string     `gorm:"not null;index" json:"rider_id"`
-	DriverID       string     `gorm:"index" json:"driver_id,omitempty"`
+	DriverID       *string    `gorm:"index" json:"driver_id,omitempty"`
 	PickupLat      float64    `gorm:"not null" json:"pickup_lat"`
 	PickupLng      float64    `gorm:"not null" json:"pickup_lng"`
 	PickupAddress  string     `json:"pickup_address"`

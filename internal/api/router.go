@@ -55,6 +55,7 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, cfg *config.Config) http.Handler 
 			r.Patch("/driver/availability", driverHandler.UpdateAvailability)
 
 			r.Post("/rides", rideHandler.CreateRide)
+			r.Post("/fares", rideHandler.CreateFare)
 			r.Get("/rides", rideHandler.GetRides)
 			r.Get("/rides/{id}", rideHandler.GetRide)
 			r.Post("/rides/{id}/accept", rideHandler.AcceptRide)
