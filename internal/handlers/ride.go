@@ -385,8 +385,8 @@ func (h *RideHandler) RateRide(w http.ResponseWriter, r *http.Request) {
 }
 
 func calculateFare(distance float64) float64 {
-	baseFare := 30.0
-	perKmRate := 15.0
+	baseFare := 20.0
+	perKmRate := 30.0
 	return math.Round((baseFare+distance*perKmRate)*100) / 100
 }
 
