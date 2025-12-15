@@ -399,7 +399,6 @@ func (h *RideHandler) RateRide(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusCreated, rating)
 }
 
-// logHistory records ride state transitions for admin visibility; best-effort (errors ignored).
 func (h *RideHandler) logHistory(rideID, status, note string) {
 	_ = h.db.Create(&models.RideHistory{RideID: rideID, Status: status, Note: note}).Error
 }
