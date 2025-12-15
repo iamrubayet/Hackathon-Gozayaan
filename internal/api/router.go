@@ -69,7 +69,6 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, cfg *config.Config) http.Handler 
 		})
 	})
 
-	// Minimal admin panel (basic auth: admin/admin)
 	r.Route("/admin", func(ar chi.Router) {
 		handlers.RegisterAdminRoutes(ar, adminHandler)
 	})
